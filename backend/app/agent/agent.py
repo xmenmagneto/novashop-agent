@@ -19,7 +19,20 @@ class Agent:
         - RAG: retrieved knowledge base chunks injected into the system prompt.
         - Tools: OpenAI native function calling for live/mock business data.
         """
-        # Retrieve relevant knowledge for the system prompt.
+        context_chunks, sources = self.retrieve_context(messages)
+        system_prompt = build_system_prompt(context_chunks)
+
+        # Use the tool-calling chat so the LLM can decide whether to call a tool.
+        response = chat_with_tools(messages, system_prompt=system_prompt)
+        return response, sources
+
+    def retrieve_context(self, messages: list[dict]) -> tuple[list[dict], list[str]]:
+        """Run RAG retrieval for the streaming path.
+
+        Returns (context_chunks, source_filenames).
+        Used by the /chat/stream endpoint so RAG results can be sent to the
+        client while the LLM response is streamed.
+        """
         retrieval_query = self._build_retrieval_query(messages)
 
         context_chunks: list[dict] = []
@@ -34,11 +47,7 @@ class Agent:
                 context_chunks = []
                 sources = []
 
-        system_prompt = build_system_prompt(context_chunks)
-
-        # Use the tool-calling chat so the LLM can decide whether to call a tool.
-        response = chat_with_tools(messages, system_prompt=system_prompt)
-        return response, sources
+        return context_chunks, sources
 
     @staticmethod
     def _build_retrieval_query(messages: list[dict]) -> str:

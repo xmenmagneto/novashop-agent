@@ -72,20 +72,15 @@ def chat_with_openai(messages: list[dict], system_prompt: str = SYSTEM_PROMPT) -
         return _API_UNAVAILABLE_MSG
 
 
-def chat_with_tools(messages: list[dict], system_prompt: str = SYSTEM_PROMPT) -> str:
-    """Chat with OpenAI using native tool calling.
+def chat_with_tools_stream(messages: list[dict], system_prompt: str = SYSTEM_PROMPT):
+    """Generator version of chat_with_tools that streams the final response.
 
-    Runs the normal tool-call loop:
-      1. Send messages + tools to the model.
-      2. If the model requests tool calls, execute them and append the results.
-      3. Repeat until the model returns a final text response.
-      4. Return the final assistant message content.
+    The tool-calling loop runs synchronously (tools are fast and the user sees
+    a "thinking" indicator). Once the model is ready to produce a final text
+    answer, that answer is streamed token-by-token back to the caller.
 
-    Multiple tool calls in a single turn are supported.
-
-    If the OpenAI API fails at any point, a user-friendly fallback message is
-    returned. Tool execution errors are handled inside execute_tool and surfaced
-    to the model as tool-result errors, so the agent never claims success.
+    Yields:
+        str: incremental pieces of the assistant's final response text.
     """
     conversation = [{"role": "system", "content": system_prompt}, *messages]
 
@@ -97,15 +92,30 @@ def chat_with_tools(messages: list[dict], system_prompt: str = SYSTEM_PROMPT) ->
                 tools=TOOLS,
                 tool_choice="auto",
             )
-        except Exception as exc:  # noqa: BLE001 — log the real error, return safe text
+        except Exception:  # noqa: BLE001 — log the real error, return safe text
             logger.exception("OpenAI chat completion (with tools) failed")
-            return _API_UNAVAILABLE_MSG
+            yield _API_UNAVAILABLE_MSG
+            return
 
         message = completion.choices[0].message
 
         # If the model did not call any tool, we have the final answer.
+        # Re-issue the call with stream=True so the caller gets tokens live.
         if not message.tool_calls:
-            return message.content or ""
+            try:
+                stream = get_client().chat.completions.create(
+                    model=CHAT_MODEL,
+                    messages=conversation,
+                    stream=True,
+                )
+                for chunk in stream:
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        yield delta.content
+            except Exception:  # noqa: BLE001
+                logger.exception("OpenAI streaming completion failed")
+                yield _API_UNAVAILABLE_MSG
+            return
 
         # Append the assistant's tool-call message to the conversation.
         conversation.append(message)
@@ -121,3 +131,12 @@ def chat_with_tools(messages: list[dict], system_prompt: str = SYSTEM_PROMPT) ->
                 "name": name,
                 "content": result,
             })
+
+
+def chat_with_tools(messages: list[dict], system_prompt: str = SYSTEM_PROMPT) -> str:
+    """Chat with OpenAI using native tool calling. Returns the full final reply.
+
+    This is a convenience wrapper around chat_with_tools_stream that collects
+    all streamed tokens into a single string.
+    """
+    return "".join(chat_with_tools_stream(messages, system_prompt=system_prompt))

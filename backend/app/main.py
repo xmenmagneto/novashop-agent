@@ -1,11 +1,15 @@
+import json
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .agent.agent import Agent
+from .agent.prompts import build_system_prompt
+from .llm import SYSTEM_PROMPT, chat_with_tools_stream
 from .rag.chunker import chunk_documents
 from .rag.embeddings import embed_chunks
 from .rag.loader import load_documents
@@ -116,3 +120,54 @@ def chat(request: ChatRequest):
         ) from exc
 
     return ChatResponse(response=reply, sources=sources)
+
+
+@app.post("/chat/stream")
+def chat_stream(request: ChatRequest):
+    """Stream the assistant's response as JSON Lines (NDJSON).
+
+    Protocol (one JSON object per line):
+      {"type": "content", "text": "..."}  — a piece of the response text
+      {"type": "sources", "sources": [...]} — RAG source filenames (sent last)
+      {"type": "error", "message": "..."}  — if something went wrong
+
+    The existing /chat endpoint is kept for non-streaming callers.
+    """
+    if not request.messages:
+        raise HTTPException(status_code=400, detail="messages cannot be empty")
+
+    messages_dicts = [m.model_dump() for m in request.messages]
+
+    def event_generator():
+        try:
+            if _agent is None:
+                system_prompt = SYSTEM_PROMPT
+                sources: list[str] = []
+            else:
+                context_chunks, sources = _agent.retrieve_context(messages_dicts)
+                system_prompt = build_system_prompt(context_chunks)
+
+            # Stream the assistant's final response token by token.
+            for token in chat_with_tools_stream(messages_dicts, system_prompt=system_prompt):
+                yield json.dumps({"type": "content", "text": token}, ensure_ascii=False) + "\n"
+
+            # Send the RAG sources so the UI can display them subtly.
+            yield json.dumps({"type": "sources", "sources": sources}, ensure_ascii=False) + "\n"
+        except RuntimeError:
+            logger.exception("Runtime error in streaming chat")
+            yield json.dumps({
+                "type": "error",
+                "message": "The service is not configured correctly. Please contact support.",
+            }) + "\n"
+        except Exception:  # noqa: BLE001
+            logger.exception("Unexpected error in streaming chat")
+            yield json.dumps({
+                "type": "error",
+                "message": "Something went wrong while processing your request. Please try again later.",
+            }) + "\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
