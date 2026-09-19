@@ -1,6 +1,6 @@
-"""The NovaShop support agent: RAG retrieval + conversation response."""
+"""The NovaShop support agent: RAG retrieval + tool calling + conversation response."""
 
-from ..llm import chat_with_openai
+from ..llm import chat_with_tools
 from ..rag.retriever import Retriever
 from .prompts import build_system_prompt
 
@@ -14,11 +14,12 @@ class Agent:
 
         Returns (response_text, source_filenames).
         `messages` is a list of {"role", "content"} dicts (user/assistant turns).
+
+        The agent combines two information sources:
+        - RAG: retrieved knowledge base chunks injected into the system prompt.
+        - Tools: OpenAI native function calling for live/mock business data.
         """
-        # Build a retrieval query from the latest user message plus the previous
-        # user turn (if any). This gives the embedder enough context to resolve
-        # vague follow-ups like "How long does the standard option take?" that
-        # only make sense in light of an earlier message (e.g. about shipping).
+        # Retrieve relevant knowledge for the system prompt.
         retrieval_query = self._build_retrieval_query(messages)
 
         context_chunks: list[dict] = []
@@ -34,7 +35,9 @@ class Agent:
                 sources = []
 
         system_prompt = build_system_prompt(context_chunks)
-        response = chat_with_openai(messages, system_prompt=system_prompt)
+
+        # Use the tool-calling chat so the LLM can decide whether to call a tool.
+        response = chat_with_tools(messages, system_prompt=system_prompt)
         return response, sources
 
     @staticmethod

@@ -94,9 +94,9 @@ def chat(request: ChatRequest):
 
     try:
         if _agent is None:
-            # Fallback: no RAG, just a direct LLM call.
-            from .llm import chat_with_openai
-            reply = chat_with_openai(messages_dicts)
+            # Fallback: no RAG, but tools still work.
+            from .llm import chat_with_tools
+            reply = chat_with_tools(messages_dicts)
             return ChatResponse(response=reply, sources=[])
 
         reply, sources = _agent.reply(messages_dicts)

@@ -3,6 +3,8 @@ import os
 from openai import OpenAI
 
 from .config import CHAT_MODEL, EMBEDDING_MODEL, SYSTEM_PROMPT_PATH
+from .tools.definitions import TOOLS
+from .tools.executor import execute_tool
 
 # Load environment variables from a local .env file if present.
 try:
@@ -52,3 +54,45 @@ def chat_with_openai(messages: list[dict], system_prompt: str = SYSTEM_PROMPT) -
         messages=[{"role": "system", "content": system_prompt}, *messages],
     )
     return completion.choices[0].message.content
+
+
+def chat_with_tools(messages: list[dict], system_prompt: str = SYSTEM_PROMPT) -> str:
+    """Chat with OpenAI using native tool calling.
+
+    Runs the normal tool-call loop:
+      1. Send messages + tools to the model.
+      2. If the model requests tool calls, execute them and append the results.
+      3. Repeat until the model returns a final text response.
+      4. Return the final assistant message content.
+
+    Multiple tool calls in a single turn are supported.
+    """
+    conversation = [{"role": "system", "content": system_prompt}, *messages]
+
+    while True:
+        completion = get_client().chat.completions.create(
+            model=CHAT_MODEL,
+            messages=conversation,
+            tools=TOOLS,
+            tool_choice="auto",
+        )
+        message = completion.choices[0].message
+
+        # If the model did not call any tool, we have the final answer.
+        if not message.tool_calls:
+            return message.content or ""
+
+        # Append the assistant's tool-call message to the conversation.
+        conversation.append(message)
+
+        # Execute each requested tool and append the results.
+        for tool_call in message.tool_calls:
+            name = tool_call.function.name
+            arguments = tool_call.function.arguments
+            result = execute_tool(name, arguments)
+            conversation.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "name": name,
+                "content": result,
+            })
