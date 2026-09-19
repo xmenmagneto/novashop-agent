@@ -346,7 +346,7 @@ novashop-agent/
 ### 1. Clone the Repository
 
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/xmenmagneto/novashop-agent.git
 cd novashop-agent
 ```
 
@@ -399,7 +399,7 @@ http://localhost:3000
 
 ## AI Tools Used During Development
 
-I used **Cursor** as an AI coding assistant throughout the development process.
+I used **TraeCode** as an AI coding assistant throughout the development process.
 
 I primarily used it to:
 
