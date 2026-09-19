@@ -145,8 +145,21 @@ export default function Home() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Enter sends; Shift+Enter inserts a newline.
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key !== "Enter") return;
+    if (e.shiftKey) {
+      // Shift+Enter: insert a newline at the cursor (do NOT send).
+      e.preventDefault();
+      const ta = e.currentTarget;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const newValue = input.slice(0, start) + "\n" + input.slice(end);
+      setInput(newValue);
+      // Restore the caret after the inserted newline.
+      requestAnimationFrame(() => {
+        ta.selectionStart = ta.selectionEnd = start + 1;
+      });
+    } else {
+      // Plain Enter: send the message.
       e.preventDefault();
       handleSend();
     }
@@ -393,6 +406,7 @@ const styles: Record<string, React.CSSProperties> = {
   bubbleContent: {
     margin: 0,
     fontSize: "0.95rem",
+    whiteSpace: "pre-wrap",
   },
   thinking: {
     color: "#9ca3af",
