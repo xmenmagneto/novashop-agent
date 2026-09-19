@@ -422,6 +422,58 @@ I still made the key product and architecture decisions manually, including:
 * Choosing mock data instead of introducing production infrastructure
 * Defining the agent's boundaries and escalation behavior
 
+## What Worked Well
+
+### Incremental, independently testable layers
+
+Building the system one capability at a time — chat skeleton → conversation memory → RAG → tools → error handling → streaming — meant every layer could be tested and committed before moving on. This made regressions easy to spot (for example, confirming RAG and tools still worked after streaming was introduced).
+
+### Native OpenAI tool calling
+
+Letting the model decide when to call a tool, instead of hardcoding rules like `if "order" in message`, worked reliably. The agent correctly routes policy questions to the knowledge base and live-data questions to tools with no intent-classification code to maintain.
+
+### RAG and tools as separate information paths
+
+Keeping retrieved knowledge in the system prompt and business actions behind function calling made the responsibilities clear. The same request path supports both, and the model consistently chooses the right one.
+
+### A deliberately tiny RAG implementation
+
+An in-memory vector store with plain-Python cosine similarity (no numpy, no external database) was enough to demonstrate the full retrieval concept while keeping setup to a single `pip install`.
+
+### Simple JSON Lines streaming
+
+Using NDJSON over a normal `POST` endpoint (`{content}`, `{sources}`, `{error}` frames) gave progressive output without WebSockets, and the stream could be inspected directly with `curl`.
+
+### Errors fed back into the agent
+
+Tool failures are returned to the model as tool-result errors rather than raised. This made it natural for the agent to say "I was unable to create the ticket" and never claim an action succeeded when it did not.
+
+## What Didn't Work Well / Was Hard
+
+### Tuning the retrieval similarity threshold
+
+The relevance threshold (0.50) needed empirical tuning. An unrelated question (e.g., "employee vacation policy") sometimes retrieved low-similarity chunks, so the "no relevant knowledge" decision still leaned partly on the LLM declining to answer. A hybrid search or a reranker would be more robust than a single cosine cutoff.
+
+### Embeddings regenerate on every startup
+
+The knowledge base is re-embedded from scratch each time the server boots. With a dozen chunks this is acceptable, but it adds startup latency and embedding-API calls. Caching embeddings to disk (or using a persistent vector store) would be the obvious improvement.
+
+### Streaming does not start until tool calls finish
+
+Because a response may first require one or more tool calls, real token streaming only begins after the tool loop completes. Tool-based answers therefore show a "thinking" delay before the first token, unlike pure knowledge answers. A future version could surface a "looking up order…" status during that gap.
+
+### Full conversation history is re-sent each turn
+
+The client sends the entire message history on every request, so token usage grows with conversation length, and refreshing the page loses the session entirely. This was an intentional prototype simplification but would not scale.
+
+### Shift+Enter relied on native behavior
+
+The first version of the input relied on the textarea's default Shift+Enter behavior, which broke under some input methods (and under automated testing). It had to be changed to explicitly insert the newline at the caret and to render it with `white-space: pre-wrap`. A reminder that subtle input behavior deserves an explicit, tested implementation.
+
+### Manual/automated test coverage gaps
+
+End-to-end testing required a running backend with a real API key, and the browser automation could not resize the viewport, so narrow-screen layout was verified by CSS inspection rather than visually. A small set of mocked API tests would make the non-UI logic safer to change.
+
 ## Trade-offs
 
 This project is intentionally designed as a prototype.
