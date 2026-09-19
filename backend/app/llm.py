@@ -1,3 +1,4 @@
+import logging
 import os
 
 from openai import OpenAI
@@ -5,6 +6,8 @@ from openai import OpenAI
 from .config import CHAT_MODEL, EMBEDDING_MODEL, SYSTEM_PROMPT_PATH
 from .tools.definitions import TOOLS
 from .tools.executor import execute_tool
+
+logger = logging.getLogger("novashop.llm")
 
 # Load environment variables from a local .env file if present.
 try:
@@ -18,6 +21,12 @@ except ImportError:
 SYSTEM_PROMPT = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
 
 _client: OpenAI | None = None
+
+# User-friendly fallback returned when the OpenAI API is unreachable.
+_API_UNAVAILABLE_MSG = (
+    "I'm having trouble connecting to the AI service right now. "
+    "Please try again in a moment, or I can create a support ticket for you."
+)
 
 
 def get_client() -> OpenAI:
@@ -48,12 +57,19 @@ def chat_with_openai(messages: list[dict], system_prompt: str = SYSTEM_PROMPT) -
     `messages` is a list of {"role": ..., "content": ...} dicts (user/assistant).
     The system prompt is prepended automatically. Pass `system_prompt` to override
     the default (e.g., to inject retrieved knowledge into the system context).
+
+    If the OpenAI API call fails, a user-friendly fallback message is returned
+    instead of raising.
     """
-    completion = get_client().chat.completions.create(
-        model=CHAT_MODEL,
-        messages=[{"role": "system", "content": system_prompt}, *messages],
-    )
-    return completion.choices[0].message.content
+    try:
+        completion = get_client().chat.completions.create(
+            model=CHAT_MODEL,
+            messages=[{"role": "system", "content": system_prompt}, *messages],
+        )
+        return completion.choices[0].message.content or ""
+    except Exception as exc:  # noqa: BLE001 — log the real error, return safe text
+        logger.exception("OpenAI chat completion failed")
+        return _API_UNAVAILABLE_MSG
 
 
 def chat_with_tools(messages: list[dict], system_prompt: str = SYSTEM_PROMPT) -> str:
@@ -66,16 +82,25 @@ def chat_with_tools(messages: list[dict], system_prompt: str = SYSTEM_PROMPT) ->
       4. Return the final assistant message content.
 
     Multiple tool calls in a single turn are supported.
+
+    If the OpenAI API fails at any point, a user-friendly fallback message is
+    returned. Tool execution errors are handled inside execute_tool and surfaced
+    to the model as tool-result errors, so the agent never claims success.
     """
     conversation = [{"role": "system", "content": system_prompt}, *messages]
 
     while True:
-        completion = get_client().chat.completions.create(
-            model=CHAT_MODEL,
-            messages=conversation,
-            tools=TOOLS,
-            tool_choice="auto",
-        )
+        try:
+            completion = get_client().chat.completions.create(
+                model=CHAT_MODEL,
+                messages=conversation,
+                tools=TOOLS,
+                tool_choice="auto",
+            )
+        except Exception as exc:  # noqa: BLE001 — log the real error, return safe text
+            logger.exception("OpenAI chat completion (with tools) failed")
+            return _API_UNAVAILABLE_MSG
+
         message = completion.choices[0].message
 
         # If the model did not call any tool, we have the final answer.

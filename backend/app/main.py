@@ -101,8 +101,18 @@ def chat(request: ChatRequest):
 
         reply, sources = _agent.reply(messages_dicts)
     except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        # Missing API key etc. — log the detail, return a safe message.
+        logger.exception("Runtime error handling chat request")
+        raise HTTPException(
+            status_code=500,
+            detail="The service is not configured correctly. Please contact support.",
+        ) from exc
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"OpenAI error: {exc}") from exc
+        # Log the full error for debugging; never expose internals to the client.
+        logger.exception("Unexpected error handling chat request")
+        raise HTTPException(
+            status_code=500,
+            detail="Something went wrong while processing your request. Please try again later.",
+        ) from exc
 
     return ChatResponse(response=reply, sources=sources)
