@@ -1,7 +1,8 @@
 import os
-from pathlib import Path
 
 from openai import OpenAI
+
+from .config import CHAT_MODEL, EMBEDDING_MODEL, SYSTEM_PROMPT_PATH
 
 # Load environment variables from a local .env file if present.
 try:
@@ -12,7 +13,6 @@ except ImportError:
     pass
 
 # Load the system prompt from a dedicated file so it is not hardcoded here.
-SYSTEM_PROMPT_PATH = Path(__file__).parent / "system_prompt.txt"
 SYSTEM_PROMPT = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
 
 _client: OpenAI | None = None
@@ -31,14 +31,24 @@ def get_client() -> OpenAI:
     return _client
 
 
-def chat_with_openai(messages: list[dict]) -> str:
+def embed_text(text: str) -> list[float]:
+    """Return the embedding vector for the given text."""
+    response = get_client().embeddings.create(
+        model=EMBEDDING_MODEL,
+        input=text,
+    )
+    return response.data[0].embedding
+
+
+def chat_with_openai(messages: list[dict], system_prompt: str = SYSTEM_PROMPT) -> str:
     """Send the conversation history to OpenAI and return the assistant's reply.
 
     `messages` is a list of {"role": ..., "content": ...} dicts (user/assistant).
-    The system prompt is prepended automatically.
+    The system prompt is prepended automatically. Pass `system_prompt` to override
+    the default (e.g., to inject retrieved knowledge into the system context).
     """
     completion = get_client().chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "system", "content": SYSTEM_PROMPT}, *messages],
+        model=CHAT_MODEL,
+        messages=[{"role": "system", "content": system_prompt}, *messages],
     )
     return completion.choices[0].message.content

@@ -7,6 +7,7 @@ type Role = "user" | "assistant";
 interface ChatMessage {
   role: Role;
   content: string;
+  sources?: string[];
 }
 
 const BACKEND_URL = "http://localhost:8000/chat";
@@ -54,7 +55,8 @@ export default function Home() {
       }
 
       const reply: string = data.response ?? "(empty response)";
-      setMessages([...nextMessages, { role: "assistant", content: reply }]);
+      const sources: string[] = Array.isArray(data.sources) ? data.sources : [];
+      setMessages([...nextMessages, { role: "assistant", content: reply, sources }]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong.";
       setError(msg);
@@ -91,6 +93,11 @@ export default function Home() {
               {m.role === "user" ? "You" : "Nova"}
             </strong>
             <p style={styles.bubbleContent}>{m.content}</p>
+            {m.role === "assistant" && m.sources && m.sources.length > 0 && (
+              <div style={styles.sources}>
+                Sources: {m.sources.join(", ")}
+              </div>
+            )}
           </div>
         ))}
 
@@ -172,6 +179,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   bubbleRole: { fontSize: "0.75rem", opacity: 0.8, display: "block" },
   bubbleContent: { margin: "0.25rem 0 0" },
+  sources: {
+    marginTop: "0.5rem",
+    fontSize: "0.72rem",
+    color: "#6b7280",
+    fontStyle: "italic",
+  },
   error: {
     backgroundColor: "#fee2e2",
     color: "#991b1b",
