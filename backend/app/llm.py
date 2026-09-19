@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from openai import OpenAI
 
@@ -10,10 +11,9 @@ try:
 except ImportError:
     pass
 
-SYSTEM_PROMPT = (
-    "You are NovaShop's customer support assistant. "
-    "Answer the user's question politely and concisely."
-)
+# Load the system prompt from a dedicated file so it is not hardcoded here.
+SYSTEM_PROMPT_PATH = Path(__file__).parent / "system_prompt.txt"
+SYSTEM_PROMPT = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
 
 _client: OpenAI | None = None
 
@@ -31,13 +31,14 @@ def get_client() -> OpenAI:
     return _client
 
 
-def chat_with_openai(user_message: str) -> str:
-    """Send a user message to OpenAI and return the assistant's reply."""
+def chat_with_openai(messages: list[dict]) -> str:
+    """Send the conversation history to OpenAI and return the assistant's reply.
+
+    `messages` is a list of {"role": ..., "content": ...} dicts (user/assistant).
+    The system prompt is prepended automatically.
+    """
     completion = get_client().chat.completions.create(
         model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ],
+        messages=[{"role": "system", "content": SYSTEM_PROMPT}, *messages],
     )
     return completion.choices[0].message.content
